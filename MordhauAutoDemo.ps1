@@ -25,6 +25,7 @@ $Cfg = @{
     RecordHz    = 0        # >0 also types "demo.recordhz N" first (sharper timing, bigger files)
     ConsoleKey  = ""       # blank = read from Mordhau's Input.ini (default Tilde)
     Beep        = 0        # 1 = short sound when a recording starts
+    QuietMs     = 1200     # only type after this long with no key / mouse button held
     RecordOffline = 1      # 1 = also record offline / practice / bot games
 }
 $CfgFile = Join-Path $Here "settings.ini"
@@ -56,6 +57,7 @@ public static class AdKeys {
     [DllImport("user32.dll")] static extern uint MapVirtualKey(uint code, uint mapType);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
     const uint SCANCODE = 0x8, KEYUP = 0x2, UNICODE = 0x4;
 
     static void Send(ushort vk, ushort scan, uint flags) {
@@ -69,12 +71,37 @@ public static class AdKeys {
         Send(0, sc, SCANCODE); System.Threading.Thread.Sleep(30);
         Send(0, sc, SCANCODE | KEYUP); System.Threading.Thread.Sleep(30);
     }
+    // Quick tap for repeated keys (clearing the console line).
+    public static void TapFast(ushort vk, int n) {
+        ushort sc = (ushort)MapVirtualKey(vk, 0);
+        for (int k = 0; k < n; k++) {
+            Send(0, sc, SCANCODE); Send(0, sc, SCANCODE | KEYUP);
+            System.Threading.Thread.Sleep(3);
+        }
+    }
     // Text as unicode characters - independent of keyboard layout.
     public static void Type(string s) {
         foreach (char c in s) {
             Send(0, c, UNICODE); Send(0, c, UNICODE | KEYUP);
-            System.Threading.Thread.Sleep(8);
+            System.Threading.Thread.Sleep(4);
         }
+    }
+    // True if any key or mouse button is held right now.
+    public static bool AnyDown() {
+        for (int vk = 1; vk < 0xFF; vk++) {
+            if (vk == 0x14 || vk == 0x90 || vk == 0x91) continue;   // lock keys
+            if ((GetAsyncKeyState(vk) & 0x8000) != 0) return true;
+        }
+        return false;
+    }
+    // Watch the keyboard and mouse buttons for ms; false the moment anything is pressed.
+    public static bool Quiet(int ms) {
+        var t = System.Diagnostics.Stopwatch.StartNew();
+        while (t.ElapsedMilliseconds < ms) {
+            if (AnyDown()) return false;
+            System.Threading.Thread.Sleep(15);
+        }
+        return true;
     }
     public static uint ForegroundPid() {
         uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid); return pid;
@@ -160,6 +187,10 @@ function Ad-Command([string]$Cmd, [int]$Vk) {
     if ($DryRun) { Ad-Say "(dry run) would type: $Cmd" Magenta; return }
     [AdKeys]::Tap($Vk)
     Start-Sleep -Milliseconds 150        # let the console open
+    # Mordhau keeps half-typed text in the console line between openings;
+    # without this it gets glued in front ("t.MaxFPS 500demorec ...").
+    [AdKeys]::Tap(0x23)                  # End
+    [AdKeys]::TapFast(0x08, 80)          # Backspace the line clear
     [AdKeys]::Type($Cmd)
     Start-Sleep -Milliseconds 50
     [AdKeys]::Tap(0x0D)                  # Enter runs it and closes the console
@@ -176,16 +207,20 @@ function Ad-TryStart {
     if (-not $S.InMatch -or $S.Recording) { return }
     $Now = Get-Date
     if (($Now - $S.LoadedAt).TotalSeconds -lt [double]$Cfg.StartDelay) { return }
-    if ($S.Tries -ge 3) { return }
+    if ($S.Tries -ge 4) { return }
     if (($Now - $S.LastTry).TotalSeconds -lt 6) { return }   # wait for the log to confirm
     if (-not (Ad-GameFocused)) { return }                     # never type into other windows
+    # Wait until the player isn't pressing anything (spawn screen, standing
+    # still) so our keys can't mix with theirs. Doesn't use up a try.
+    if (-not $DryRun -and -not [AdKeys]::Quiet([int]$Cfg.QuietMs)) { return }
+    if (-not (Ad-GameFocused)) { return }
 
     $S.Tries++; $S.LastTry = $Now
     if (-not $S.Name) { $S.Name = Ad-DemoName }   # same name on retries: a late start just gets overwritten
-    Ad-Say "Starting demo (try $($S.Tries)/3): $($S.Name)" Yellow
+    Ad-Say "Starting demo (try $($S.Tries)/4): $($S.Name)" Yellow
     if ([int]$Cfg.RecordHz -gt 0) { Ad-Command "demo.recordhz $($Cfg.RecordHz)" $script:ConVk; Start-Sleep -Milliseconds 250 }
     Ad-Command "demorec $($S.Name)" $script:ConVk
-    if ($S.Tries -ge 3) {
+    if ($S.Tries -ge 4) {
         # checked again next loop; if still not recording, say so once
         $script:WarnAt = $Now.AddSeconds(6)
     }

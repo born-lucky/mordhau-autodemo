@@ -16,6 +16,7 @@ That's it. It's running now and will start by itself every time you log in to Wi
 - Each time you join a server, the map changes, or you start an offline / practice game, it opens the console for a split second and types `demorec auto_<date>_<time>_<map>`.
 - Mordhau stops a demo by itself on every map change, so each map gets its own file.
 - It **only types while the Mordhau window is focused**. If you're alt-tabbed, it waits until you come back.
+- It **waits until you aren't pressing anything** (no key or mouse button held for ~1 s, e.g. on the spawn screen), clears any half-typed text in the console line, then types the command in about a quarter of a second. Your keys and its keys never mix.
 - If you start a demo yourself, it notices and leaves you alone.
 - The main menu and demo playback are never recorded.
 - Old `auto_*` demos are deleted once they pass **10 GB** total (a match is ~15-30 MB). Demos you name yourself are never touched.
@@ -40,6 +41,7 @@ Edit `%LOCALAPPDATA%\MordhauAutoDemo\settings.ini`, then log out and back in (or
 | `StartDelay` | `3` | Seconds after the map loads before recording |
 | `RecordHz` | `0` | e.g. `120` for sharper timing (bigger files) |
 | `Beep` | `0` | `1` = a short sound when a recording starts |
+| `QuietMs` | `1200` | How long you must press nothing before it types |
 
 ## Is this safe?
 
